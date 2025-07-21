@@ -8,55 +8,78 @@
     <style>
         body {
             margin: 0;
+            padding: 0;
             font-family: 'Monaco', 'Menlo', monospace;
             background: #0a0a0a;
             color: #ffffff;
+            overflow: hidden;
         }
 
         .container {
             display: grid;
-            grid-template-columns: 1fr 1fr 300px;
+            grid-template-columns: 60% 40%;
             height: 100vh;
-            gap: 10px;
-            padding: 10px;
+            width: 100vw;
+            gap: 0;
+            padding: 0;
+            box-sizing: border-box;
         }
 
-        #orderbook-canvas {
+        #orderbook-chart {
             background: #111111;
-            border: 1px solid #333;
-            border-radius: 4px;
+            border: none;
+            width: 100%;
+            height: 100%;
+            display: block;
         }
 
-        .queue-viz {
+        .d3fc-svg {
+            overflow: visible;
+        }
+
+        .combined-sidebar {
             background: #1a1a1a;
-            border: 1px solid #333;
-            border-radius: 4px;
+            border: none;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            box-sizing: border-box;
+        }
+
+        .queue-section {
+            flex: 0 0 40%;
             padding: 10px;
             overflow: hidden;
+            border-bottom: 2px solid #333;
         }
 
-        .sidebar {
-            background: #1a1a1a;
-            border: 1px solid #333;
-            border-radius: 4px;
-            padding: 15px;
+        .book-section {
+            flex: 1;
+            padding: 10px;
             overflow-y: auto;
         }
 
         .level {
             display: flex;
             justify-content: space-between;
-            padding: 2px 0;
-            font-size: 11px;
+            padding: 4px 0;
+            font-size: 13px;
             border-bottom: 1px solid #333;
+            font-weight: 500;
         }
 
         .bid-level {
             color: #00ff88;
+            background: rgba(0, 255, 136, 0.1);
+            border-radius: 2px;
+            padding: 2px 4px;
         }
 
         .ask-level {
             color: #ff4444;
+            background: rgba(255, 68, 68, 0.1);
+            border-radius: 2px;
+            padding: 2px 4px;
         }
 
         .queue-orders {
@@ -73,27 +96,30 @@
         }
 
         .status {
-            position: fixed;
-            top: 10px;
-            left: 10px;
-            padding: 5px 10px;
-            border-radius: 3px;
-            font-size: 12px;
-            background: #004400;
-            color: #00ff00;
+            display: none;
         }
 
         h3 {
-            margin-top: 0;
+            margin: 0 0 10px 0;
             color: #ffff00;
             text-align: center;
+            font-size: 16px;
+            border-bottom: 1px solid #444;
+            padding-bottom: 5px;
         }
 
         .stats {
-            font-size: 10px;
-            color: #aaa;
+            font-size: 12px;
+            color: #ddd;
             text-align: center;
             margin-bottom: 10px;
+            font-weight: 600;
+        }
+
+        h4 {
+            font-size: 14px;
+            margin: 10px 0 5px 0;
+            font-weight: 600;
         }
     </style>
 </head>
@@ -102,23 +128,27 @@
     <div class="status" id="status">L3 Connected</div>
 
     <div class="container">
-        <canvas id="orderbook-canvas"></canvas>
+        <div id="orderbook-chart"></div>
 
-        <div class="queue-viz">
-            <h3>Order Queue Visualization</h3>
-            <div class="stats" id="queue-stats"></div>
-            <div id="queue-display"></div>
-        </div>
-
-        <div class="sidebar">
-            <h3>L3 Order Book</h3>
-            <div id="book-stats" class="stats"></div>
-            <div id="asks-section"></div>
-            <div id="spread-info" style="text-align: center; color: #ffff00; margin: 10px 0;"></div>
-            <div id="bids-section"></div>
+        <div class="combined-sidebar">
+            <div class="queue-section">
+                <h3>Order Queue Visualization</h3>
+                <div class="stats" id="queue-stats"></div>
+                <div id="queue-display"></div>
+            </div>
+            
+            <div class="book-section">
+                <h3>L3 Order Book</h3>
+                <div id="book-stats" class="stats"></div>
+                <div id="asks-section"></div>
+                <div id="spread-info" style="text-align: center; color: #ffff00; margin: 10px 0;"></div>
+                <div id="bids-section"></div>
+            </div>
         </div>
     </div>
 
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/d3fc@15/build/d3fc.js"></script>
     <script src="l3-orderbook.js"></script>
 </body>
 
