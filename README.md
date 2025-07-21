@@ -2,16 +2,9 @@
 
 A real-time L3 order book visualizer for Binance perpetual futures that reconstructs individual order queues from L2 market depth data using go + d3fc.
 
-Built with Claude Sonnet.
+Built with Claude Code.
 
-Inspired by the Rust implementation by @OctopusTakopi: [binance_l3_est](https://github.com/OctopusTakopi/binance_l3_est).
-
-## Features
-
-- **Real-time L3 Reconstruction**: Estimates individual orders within each price level using FIFO queue simulation
-- **Dynamic Symbol Switching**: Switch between major crypto pairs (BTC, ETH, SOL, etc.) without restarting
-- **Advanced Visualization**: Segmented bars showing individual orders with d3fc charting
-- **Order Queue Display**: Visual representation of FIFO queues for top price levels
+Inspired by the Rust implementation by @OctopusTakopi: [binance_l3_est](https://github.com/OctopusTakopi/binance_l3_est)
 
 ## L3 Algorithm
 
