@@ -361,24 +361,44 @@ func min(a, b int) int {
 	return b
 }
 
+// Global state for symbol switching
+type AppState struct {
+	book         *L3OrderBook
+	currentSymbol string
+	binanceCancel chan bool
+	mu           sync.RWMutex
+}
+
+var appState *AppState
+
 func main() {
-	symbol := "dogeusdt"
+	symbol := "ethusdt" // Default to ETHUSDT
 	if len(os.Args) > 1 {
 		symbol = strings.ToLower(os.Args[1])
 	}
 
-	book := NewL3OrderBook(symbol)
-	go runBinanceSync(symbol, book)
+	appState = &AppState{
+		book:          NewL3OrderBook(symbol),
+		currentSymbol: symbol,
+		binanceCancel: make(chan bool, 1),
+	}
+
+	go runBinanceSync(symbol, appState.book, appState.binanceCancel)
 
 	http.Handle("/", http.FileServer(http.Dir("static")))
-	http.HandleFunc("/ws", wsHandler(book))
+	http.HandleFunc("/ws", wsHandler())
 
 	log.Printf("L3 Order Book Server running on http://localhost:8080")
 	log.Printf("Symbol: %s", strings.ToUpper(symbol))
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
 
-func wsHandler(book *L3OrderBook) http.HandlerFunc {
+type WSMessage struct {
+	Type   string `json:"type"`
+	Symbol string `json:"symbol,omitempty"`
+}
+
+func wsHandler() http.HandlerFunc {
 	var upgrader = websocket.Upgrader{
 		CheckOrigin: func(r *http.Request) bool { return true },
 	}
@@ -394,10 +414,45 @@ func wsHandler(book *L3OrderBook) http.HandlerFunc {
 		ticker := time.NewTicker(50 * time.Millisecond) // 20 FPS for L3 data
 		defer ticker.Stop()
 
+		// Handle incoming messages for symbol switching
+		go func() {
+			for {
+				var msg WSMessage
+				if err := conn.ReadJSON(&msg); err != nil {
+					log.Println("WebSocket read error:", err)
+					return
+				}
+
+				if msg.Type == "switch_symbol" && msg.Symbol != "" {
+					newSymbol := strings.ToLower(msg.Symbol)
+					log.Printf("Switching to symbol: %s", strings.ToUpper(newSymbol))
+					
+					// Switch symbol
+					if err := switchSymbol(newSymbol); err != nil {
+						errorMsg := map[string]interface{}{
+							"type":    "error",
+							"message": err.Error(),
+						}
+						conn.WriteJSON(errorMsg)
+					} else {
+						// Notify successful switch
+						switchMsg := map[string]interface{}{
+							"type":   "symbol_switched",
+							"symbol": strings.ToUpper(newSymbol),
+						}
+						conn.WriteJSON(switchMsg)
+					}
+				}
+			}
+		}()
+
 		for {
 			select {
 			case <-ticker.C:
-				snapshot := book.getL3Snapshot(100)
+				appState.mu.RLock()
+				snapshot := appState.book.getL3Snapshot(100)
+				appState.mu.RUnlock()
+				
 				message := map[string]interface{}{
 					"type": "l3_update",
 					"data": snapshot,
@@ -411,12 +466,52 @@ func wsHandler(book *L3OrderBook) http.HandlerFunc {
 	}
 }
 
-func runBinanceSync(symbol string, book *L3OrderBook) {
+func switchSymbol(newSymbol string) error {
+	appState.mu.Lock()
+	defer appState.mu.Unlock()
+
+	if appState.currentSymbol == newSymbol {
+		return nil // Already on this symbol
+	}
+
+	// Cancel current Binance connection
+	select {
+	case appState.binanceCancel <- true:
+	default:
+	}
+
+	// Create new book and start new connection
+	appState.book = NewL3OrderBook(newSymbol)
+	appState.currentSymbol = newSymbol
+	appState.binanceCancel = make(chan bool, 1)
+
+	go runBinanceSync(newSymbol, appState.book, appState.binanceCancel)
+
+	return nil
+}
+
+func runBinanceSync(symbol string, book *L3OrderBook, cancel chan bool) {
+	for {
+		select {
+		case <-cancel:
+			log.Printf("Cancelling Binance sync for %s", strings.ToUpper(symbol))
+			return
+		default:
+			if err := connectAndSync(symbol, book, cancel); err != nil {
+				log.Printf("Connection failed for %s: %v, retrying in 5s...", strings.ToUpper(symbol), err)
+				time.Sleep(5 * time.Second)
+				continue
+			}
+		}
+	}
+}
+
+func connectAndSync(symbol string, book *L3OrderBook, cancel chan bool) error {
 	wsURL := fmt.Sprintf("wss://fstream.binance.com/ws/%s@depth@100ms", symbol)
 
 	ws, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
 	if err != nil {
-		log.Fatal("Cannot dial Binance WS:", err)
+		return fmt.Errorf("cannot dial Binance WS: %w", err)
 	}
 	defer ws.Close()
 
@@ -428,33 +523,57 @@ func runBinanceSync(symbol string, book *L3OrderBook) {
 
 	var snapResp binanceRESTResp
 	for {
-		resp, err := http.Get(snapURL)
-		if err == nil && resp.StatusCode == 200 {
-			err2 := json.NewDecoder(resp.Body).Decode(&snapResp)
-			resp.Body.Close()
-			if err2 == nil && snapResp.LastUpdateID != 0 {
-				break
+		select {
+		case <-cancel:
+			return fmt.Errorf("cancelled during snapshot fetch")
+		default:
+			resp, err := http.Get(snapURL)
+			if err == nil && resp.StatusCode == 200 {
+				err2 := json.NewDecoder(resp.Body).Decode(&snapResp)
+				resp.Body.Close()
+				if err2 == nil && snapResp.LastUpdateID != 0 {
+					goto snapshotLoaded
+				}
 			}
+			if resp != nil {
+				resp.Body.Close()
+			}
+			time.Sleep(200 * time.Millisecond)
 		}
-		time.Sleep(200 * time.Millisecond)
 	}
 
+snapshotLoaded:
 	book.loadSnapshot(&snapResp)
 	log.Printf("L3 Order Book snapshot loaded: %d", snapResp.LastUpdateID)
 
 	// Process real-time updates
 	for {
-		_, msg, err := ws.ReadMessage()
-		if err != nil {
-			log.Println("WebSocket read error:", err)
-			return
-		}
+		select {
+		case <-cancel:
+			log.Printf("Cancelling Binance sync for %s", strings.ToUpper(symbol))
+			return fmt.Errorf("cancelled")
+		default:
+			// Set a reasonable read deadline
+			ws.SetReadDeadline(time.Now().Add(1 * time.Second))
+			_, msg, err := ws.ReadMessage()
+			if err != nil {
+				if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+					return fmt.Errorf("websocket read error: %w", err)
+				}
+				// Handle timeout or normal close
+				if netErr, ok := err.(interface{ Timeout() bool }); ok && netErr.Timeout() {
+					continue // Timeout, check cancel channel again
+				}
+				return fmt.Errorf("websocket error: %w", err)
+			}
 
-		var update binanceWSUpdate
-		if err := json.Unmarshal(msg, &update); err != nil {
-			continue
-		}
+			var update binanceWSUpdate
+			if err := json.Unmarshal(msg, &update); err != nil {
+				log.Printf("Failed to unmarshal update: %v", err)
+				continue
+			}
 
-		book.applyDelta(&update)
+			book.applyDelta(&update)
+		}
 	}
 }

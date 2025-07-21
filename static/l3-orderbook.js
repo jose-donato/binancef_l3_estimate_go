@@ -4,9 +4,11 @@ class L3OrderBookVisualizer {
 		this.ws = null;
 		this.l3Data = null;
 		this.chart = null;
+		this.symbolSynced = false;
 
 		this.initChart();
 		this.initWebSocket();
+		this.initTickerSelector();
 		window.addEventListener("resize", () => this.resizeChart());
 	}
 
@@ -16,231 +18,286 @@ class L3OrderBookVisualizer {
 		this.yScale = d3.scaleLinear().domain([0, 1000]);
 
 		// Create SVG
-		this.svg = this.chartContainer.append('svg')
-			.attr('width', '100%')
-			.attr('height', '100%');
+		this.svg = this.chartContainer
+			.append("svg")
+			.attr("width", "100%")
+			.attr("height", "100%");
 
 		// Create plot area group
-		this.plotArea = this.svg.append('g')
-			.attr('class', 'plot-area');
+		this.plotArea = this.svg.append("g").attr("class", "plot-area");
 
 		this.resizeChart();
 	}
 
 	createGradients(selection, bidData, askData) {
-		let defs = selection.select('defs');
+		let defs = selection.select("defs");
 		if (defs.empty()) {
-			defs = selection.append('defs');
+			defs = selection.append("defs");
 		}
 
 		// Remove existing gradients
-		defs.selectAll('linearGradient').remove();
+		defs.selectAll("linearGradient").remove();
 
 		// Create gradients for bids
-		bidData.forEach(d => {
-			const gradient = defs.append('linearGradient')
-				.attr('id', `bid-gradient-${Math.abs(d.index)}`)
-				.attr('x1', '0%').attr('y1', '0%')
-				.attr('x2', '0%').attr('y2', '100%');
-			
-			gradient.append('stop')
-				.attr('offset', '0%')
-				.style('stop-color', '#00ff88');
-			
-			gradient.append('stop')
-				.attr('offset', '100%')
-				.style('stop-color', '#004d2a');
+		bidData.forEach((d) => {
+			const gradient = defs
+				.append("linearGradient")
+				.attr("id", `bid-gradient-${Math.abs(d.index)}`)
+				.attr("x1", "0%")
+				.attr("y1", "0%")
+				.attr("x2", "0%")
+				.attr("y2", "100%");
+
+			gradient
+				.append("stop")
+				.attr("offset", "0%")
+				.style("stop-color", "#00ff88");
+
+			gradient
+				.append("stop")
+				.attr("offset", "100%")
+				.style("stop-color", "#004d2a");
 		});
 
 		// Create gradients for asks
-		askData.forEach(d => {
-			const gradient = defs.append('linearGradient')
-				.attr('id', `ask-gradient-${d.index}`)
-				.attr('x1', '0%').attr('y1', '0%')
-				.attr('x2', '0%').attr('y2', '100%');
-			
-			gradient.append('stop')
-				.attr('offset', '0%')
-				.style('stop-color', '#ff4444');
-			
-			gradient.append('stop')
-				.attr('offset', '100%')
-				.style('stop-color', '#4d0000');
+		askData.forEach((d) => {
+			const gradient = defs
+				.append("linearGradient")
+				.attr("id", `ask-gradient-${d.index}`)
+				.attr("x1", "0%")
+				.attr("y1", "0%")
+				.attr("x2", "0%")
+				.attr("y2", "100%");
+
+			gradient
+				.append("stop")
+				.attr("offset", "0%")
+				.style("stop-color", "#ff4444");
+
+			gradient
+				.append("stop")
+				.attr("offset", "100%")
+				.style("stop-color", "#4d0000");
 		});
 	}
 
 	addPriceLabels(bidData, askData) {
 		// Remove existing labels
-		this.plotArea.selectAll('.price-labels').remove();
+		this.plotArea.selectAll(".price-labels").remove();
 
-		const labelsGroup = this.plotArea.append('g').attr('class', 'price-labels');
+		const labelsGroup = this.plotArea.append("g").attr("class", "price-labels");
 		const labelY = this.yScale.range()[0] + 30;
 
 		// Add bid price labels (every 5th bar)
-		bidData.filter((d, i) => i % 5 === 0).forEach(d => {
-			const x = this.xScale(d.index);
-			const priceText = d.price.toFixed(2);
+		bidData
+			.filter((d, i) => i % 5 === 0)
+			.forEach((d) => {
+				const x = this.xScale(d.index);
+				const priceText = d.price.toFixed(3);
 
-			// Create diagonal text group
-			const textGroup = labelsGroup.append('g')
-				.attr('transform', `translate(${x}, ${labelY}) rotate(-45)`);
+				// Create diagonal text group
+				const textGroup = labelsGroup
+					.append("g")
+					.attr("transform", `translate(${x}, ${labelY}) rotate(-45)`);
 
-			// Background rect (adjust for diagonal text)
-			textGroup.append('rect')
-				.attr('x', -30)
-				.attr('y', -8)
-				.attr('width', 60)
-				.attr('height', 16)
-				.style('fill', 'rgba(0, 0, 0, 0.8)')
-				.style('stroke', '#00ff88')
-				.style('stroke-width', 1);
+				// Background rect (adjust for diagonal text)
+				textGroup
+					.append("rect")
+					.attr("x", -30)
+					.attr("y", -8)
+					.attr("width", 60)
+					.attr("height", 16)
+					.style("fill", "rgba(0, 0, 0, 0.8)")
+					.style("stroke", "#00ff88")
+					.style("stroke-width", 1);
 
-			// Price text (diagonal)
-			textGroup.append('text')
-				.attr('x', 0)
-				.attr('y', 4)
-				.attr('text-anchor', 'middle')
-				.style('fill', '#ffffff')
-				.style('font-family', 'Monaco, monospace')
-				.style('font-size', '11px')
-				.style('font-weight', 'bold')
-				.text(priceText);
-		});
+				// Price text (diagonal)
+				textGroup
+					.append("text")
+					.attr("x", 0)
+					.attr("y", 4)
+					.attr("text-anchor", "middle")
+					.style("fill", "#ffffff")
+					.style("font-family", "Monaco, monospace")
+					.style("font-size", "11px")
+					.style("font-weight", "bold")
+					.text(priceText);
+			});
 
 		// Add ask price labels (every 5th bar)
-		askData.filter((d, i) => i % 5 === 0).forEach(d => {
-			const x = this.xScale(d.index);
-			const priceText = d.price.toFixed(2);
+		askData
+			.filter((d, i) => i % 5 === 0)
+			.forEach((d) => {
+				const x = this.xScale(d.index);
+				const priceText = d.price.toFixed(3);
 
-			// Create diagonal text group
-			const textGroup = labelsGroup.append('g')
-				.attr('transform', `translate(${x}, ${labelY}) rotate(45)`);
+				// Create diagonal text group
+				const textGroup = labelsGroup
+					.append("g")
+					.attr("transform", `translate(${x}, ${labelY}) rotate(45)`);
 
-			// Background rect (adjust for diagonal text)
-			textGroup.append('rect')
-				.attr('x', -30)
-				.attr('y', -8)
-				.attr('width', 60)
-				.attr('height', 16)
-				.style('fill', 'rgba(0, 0, 0, 0.8)')
-				.style('stroke', '#ff4444')
-				.style('stroke-width', 1);
+				// Background rect (adjust for diagonal text)
+				textGroup
+					.append("rect")
+					.attr("x", -30)
+					.attr("y", -8)
+					.attr("width", 60)
+					.attr("height", 16)
+					.style("fill", "rgba(0, 0, 0, 0.8)")
+					.style("stroke", "#ff4444")
+					.style("stroke-width", 1);
 
-			// Price text (diagonal)
-			textGroup.append('text')
-				.attr('x', 0)
-				.attr('y', 4)
-				.attr('text-anchor', 'middle')
-				.style('fill', '#ffffff')
-				.style('font-family', 'Monaco, monospace')
-				.style('font-size', '11px')
-				.style('font-weight', 'bold')
-				.text(priceText);
-		});
+				// Price text (diagonal)
+				textGroup
+					.append("text")
+					.attr("x", 0)
+					.attr("y", 4)
+					.attr("text-anchor", "middle")
+					.style("fill", "#ffffff")
+					.style("font-family", "Monaco, monospace")
+					.style("font-size", "11px")
+					.style("font-weight", "bold")
+					.text(priceText);
+			});
 	}
 
 	renderSegmentedBars(allData) {
 		// Remove existing bars
-		this.plotArea.selectAll('.segmented-bars').remove();
+		this.plotArea.selectAll(".segmented-bars").remove();
 
-		const barsGroup = this.plotArea.append('g').attr('class', 'segmented-bars');
-		const barWidth = Math.min(12, this.xScale.range()[1] / (allData.length * 2)); // Dynamic bar width
+		const barsGroup = this.plotArea.append("g").attr("class", "segmented-bars");
+		const barWidth = Math.min(
+			12,
+			this.xScale.range()[1] / (allData.length * 2),
+		); // Dynamic bar width
 
-		allData.forEach(d => {
+		allData.forEach((d) => {
 			const x = this.xScale(d.index) - barWidth / 2;
-			const baseColor = d.index < 0 ? '#00ff88' : '#ff4444';
-			const strokeColor = d.index < 0 ? '#00cc66' : '#cc3333';
-			
+			const baseColor = d.index < 0 ? "#00ff88" : "#ff4444";
+			const strokeColor = d.index < 0 ? "#00cc66" : "#cc3333";
+
 			// Draw individual order segments
 			let currentY = this.yScale(0);
 			d.orderSizes.forEach((orderSize, segmentIndex) => {
 				const segmentHeight = this.yScale(0) - this.yScale(orderSize);
-				
+
 				// Vary the color intensity for different segments
-				const intensity = Math.max(0.6, 1 - (segmentIndex * 0.1));
-				const segmentColor = d.index < 0 
-					? `rgba(0, 255, 136, ${intensity})`
-					: `rgba(255, 68, 68, ${intensity})`;
+				const intensity = Math.max(0.6, 1 - segmentIndex * 0.1);
+				const segmentColor =
+					d.index < 0
+						? `rgba(0, 255, 136, ${intensity})`
+						: `rgba(255, 68, 68, ${intensity})`;
 
 				// Draw segment rectangle
-				barsGroup.append('rect')
-					.attr('x', x)
-					.attr('y', currentY - segmentHeight)
-					.attr('width', barWidth)
-					.attr('height', segmentHeight)
-					.style('fill', segmentColor)
-					.style('stroke', strokeColor)
-					.style('stroke-width', 0.5);
+				barsGroup
+					.append("rect")
+					.attr("x", x)
+					.attr("y", currentY - segmentHeight)
+					.attr("width", barWidth)
+					.attr("height", segmentHeight)
+					.style("fill", segmentColor)
+					.style("stroke", strokeColor)
+					.style("stroke-width", 0.5);
 
 				// Add separator line between segments (except for last segment)
 				if (segmentIndex < d.orderSizes.length - 1) {
-					barsGroup.append('line')
-						.attr('x1', x)
-						.attr('x2', x + barWidth)
-						.attr('y1', currentY - segmentHeight)
-						.attr('y2', currentY - segmentHeight)
-						.style('stroke', '#ffffff')
-						.style('stroke-width', 1);
+					barsGroup
+						.append("line")
+						.attr("x1", x)
+						.attr("x2", x + barWidth)
+						.attr("y1", currentY - segmentHeight)
+						.attr("y2", currentY - segmentHeight)
+						.style("stroke", "#ffffff")
+						.style("stroke-width", 1);
 				}
 
 				currentY -= segmentHeight;
 			});
 
 			// Add outer border for the entire bar
-			barsGroup.append('rect')
-				.attr('x', x)
-				.attr('y', this.yScale(d.size))
-				.attr('width', barWidth)
-				.attr('height', this.yScale(0) - this.yScale(d.size))
-				.style('fill', 'none')
-				.style('stroke', strokeColor)
-				.style('stroke-width', 1.5);
+			barsGroup
+				.append("rect")
+				.attr("x", x)
+				.attr("y", this.yScale(d.size))
+				.attr("width", barWidth)
+				.attr("height", this.yScale(0) - this.yScale(d.size))
+				.style("fill", "none")
+				.style("stroke", strokeColor)
+				.style("stroke-width", 1.5);
 		});
 	}
 
 	addOrderCounts(allData) {
 		// Remove existing order counts
-		this.plotArea.selectAll('.order-counts').remove();
+		this.plotArea.selectAll(".order-counts").remove();
 
-		const countsGroup = this.plotArea.append('g').attr('class', 'order-counts');
+		const countsGroup = this.plotArea.append("g").attr("class", "order-counts");
 
 		// Add order count for each bar (only if > 1)
-		allData.filter(d => d.orders > 1).forEach(d => {
-			const x = this.xScale(d.index);
-			const y = this.yScale(d.size) - 15; // Position above the bar
+		allData
+			.filter((d) => d.orders > 1)
+			.forEach((d) => {
+				const x = this.xScale(d.index);
+				const y = this.yScale(d.size) - 15; // Position above the bar
 
-			// Background circle for better visibility
-			countsGroup.append('circle')
-				.attr('cx', x)
-				.attr('cy', y)
-				.attr('r', 10)
-				.style('fill', 'rgba(0, 0, 0, 0.8)')
-				.style('stroke', d.index < 0 ? '#00ff88' : '#ff4444')
-				.style('stroke-width', 1);
+				// Background circle for better visibility
+				countsGroup
+					.append("circle")
+					.attr("cx", x)
+					.attr("cy", y)
+					.attr("r", 10)
+					.style("fill", "rgba(0, 0, 0, 0.8)")
+					.style("stroke", d.index < 0 ? "#00ff88" : "#ff4444")
+					.style("stroke-width", 1);
 
-			// Order count text
-			countsGroup.append('text')
-				.attr('x', x)
-				.attr('y', y + 4) // Center vertically in circle
-				.attr('text-anchor', 'middle')
-				.style('fill', '#ffff00')
-				.style('font-family', 'Monaco, monospace')
-				.style('font-size', '10px')
-				.style('font-weight', 'bold')
-				.text(d.orders);
-		});
+				// Order count text
+				countsGroup
+					.append("text")
+					.attr("x", x)
+					.attr("y", y + 4) // Center vertically in circle
+					.attr("text-anchor", "middle")
+					.style("fill", "#ffff00")
+					.style("font-family", "Monaco, monospace")
+					.style("font-size", "10px")
+					.style("font-weight", "bold")
+					.text(d.orders);
+			});
 	}
 
 	resizeChart() {
 		if (!this.svg) return;
-		
-		this.svg
-			.style('width', '100%')
-			.style('height', '100%');
-			
+
+		this.svg.style("width", "100%").style("height", "100%");
+
 		// Re-render if we have data
 		if (this.l3Data) {
 			this.renderChart();
+		}
+	}
+
+	initTickerSelector() {
+		const tickerSelect = document.getElementById("ticker-select");
+		const connectionStatus = document.getElementById("connection-status");
+
+		tickerSelect.addEventListener("change", (event) => {
+			const newSymbol = event.target.value;
+			this.switchSymbol(newSymbol);
+		});
+	}
+
+	switchSymbol(symbol) {
+		const connectionStatus = document.getElementById("connection-status");
+		connectionStatus.textContent = "Switching...";
+		connectionStatus.style.color = "#ffaa00";
+
+		// Send switch symbol message to backend
+		if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+			this.ws.send(
+				JSON.stringify({
+					type: "switch_symbol",
+					symbol: symbol,
+				}),
+			);
 		}
 	}
 
@@ -257,11 +314,37 @@ class L3OrderBookVisualizer {
 		this.ws.onmessage = (event) => {
 			try {
 				const message = JSON.parse(event.data);
+				const connectionStatus = document.getElementById("connection-status");
+
 				if (message.type === "l3_update") {
 					this.l3Data = message.data;
 					this.renderChart();
 					this.updateSidebar();
 					this.updateQueueVisualization();
+
+					// Sync dropdown with current symbol on first data received
+					if (!this.symbolSynced) {
+						const tickerSelect = document.getElementById("ticker-select");
+						tickerSelect.value = message.data.symbol.toUpperCase();
+						this.symbolSynced = true;
+					}
+
+					// Update connection status
+					connectionStatus.textContent = "Connected";
+					connectionStatus.style.color = "#00ff88";
+				} else if (message.type === "symbol_switched") {
+					// Update UI to reflect successful symbol switch
+					const tickerSelect = document.getElementById("ticker-select");
+					tickerSelect.value = message.symbol;
+					connectionStatus.textContent = "Connected";
+					connectionStatus.style.color = "#00ff88";
+
+					// Clear existing data
+					this.l3Data = null;
+					this.plotArea.selectAll("*").remove();
+				} else if (message.type === "error") {
+					connectionStatus.textContent = "Error: " + message.message;
+					connectionStatus.style.color = "#ff4444";
 				}
 			} catch (error) {
 				console.error("Error parsing message:", error);
@@ -286,7 +369,9 @@ class L3OrderBookVisualizer {
 			size: Number.parseFloat(bid.total_size),
 			price: Number.parseFloat(bid.price),
 			orders: bid.order_count,
-			orderSizes: bid.orders ? bid.orders.map(o => Number.parseFloat(o)) : [Number.parseFloat(bid.total_size)]
+			orderSizes: bid.orders
+				? bid.orders.map((o) => Number.parseFloat(o))
+				: [Number.parseFloat(bid.total_size)],
 		}));
 
 		// Prepare ask data with individual order segments
@@ -295,13 +380,15 @@ class L3OrderBookVisualizer {
 			size: Number.parseFloat(ask.total_size),
 			price: Number.parseFloat(ask.price),
 			orders: ask.order_count,
-			orderSizes: ask.orders ? ask.orders.map(o => Number.parseFloat(o)) : [Number.parseFloat(ask.total_size)]
+			orderSizes: ask.orders
+				? ask.orders.map((o) => Number.parseFloat(o))
+				: [Number.parseFloat(ask.total_size)],
 		}));
 
 		// Update y-domain based on max size
 		const maxSize = Math.max(
-			d3.max(bidData, d => d.size) || 0,
-			d3.max(askData, d => d.size) || 0
+			d3.max(bidData, (d) => d.size) || 0,
+			d3.max(askData, (d) => d.size) || 0,
 		);
 		this.yScale.domain([0, maxSize * 1.1]);
 
@@ -315,25 +402,26 @@ class L3OrderBookVisualizer {
 		this.yScale.range([height, 0]);
 
 		// Position plot area
-		this.plotArea.attr('transform', `translate(${margin.left}, ${margin.top})`);
+		this.plotArea.attr("transform", `translate(${margin.left}, ${margin.top})`);
 
 		// Draw center line
-		this.plotArea.selectAll('.center-line').remove();
-		this.plotArea.append('line')
-			.attr('class', 'center-line')
-			.attr('x1', this.xScale(0))
-			.attr('x2', this.xScale(0))
-			.attr('y1', 0)
-			.attr('y2', height)
-			.style('stroke', '#888')
-			.style('stroke-width', 2);
+		this.plotArea.selectAll(".center-line").remove();
+		this.plotArea
+			.append("line")
+			.attr("class", "center-line")
+			.attr("x1", this.xScale(0))
+			.attr("x2", this.xScale(0))
+			.attr("y1", 0)
+			.attr("y2", height)
+			.style("stroke", "#888")
+			.style("stroke-width", 2);
 
 		// Render segmented bars
 		this.renderSegmentedBars([...bidData, ...askData]);
 
 		// Add price labels
 		this.addPriceLabels(bidData, askData);
-		
+
 		// Add order count indicators
 		this.addOrderCounts([...bidData, ...askData]);
 	}
@@ -362,35 +450,35 @@ class L3OrderBookVisualizer {
 		document.getElementById("asks-section").innerHTML = `
             <h4 style="color: #ff4444;">Asks</h4>
             ${asks
-				.slice(0, 15)
-				.reverse()
-				.map(
-					(ask) => `
+							.slice(0, 15)
+							.reverse()
+							.map(
+								(ask) => `
                 <div class="level ask-level">
                     <span>${Number.parseFloat(ask.price).toFixed(5)}</span>
                     <span>${Number.parseFloat(ask.total_size).toFixed(0)}</span>
                     <span>(${ask.order_count})</span>
                 </div>
             `,
-				)
-				.join("")}
+							)
+							.join("")}
         `;
 
 		// Update bids
 		document.getElementById("bids-section").innerHTML = `
             <h4 style="color: #00ff88;">Bids</h4>
             ${bids
-				.slice(0, 15)
-				.map(
-					(bid) => `
+							.slice(0, 15)
+							.map(
+								(bid) => `
                 <div class="level bid-level">
                     <span>${Number.parseFloat(bid.price).toFixed(5)}</span>
                     <span>${Number.parseFloat(bid.total_size).toFixed(0)}</span>
                     <span>(${bid.order_count})</span>
                 </div>
             `,
-				)
-				.join("")}
+							)
+							.join("")}
         `;
 
 		// Update spread
@@ -421,17 +509,17 @@ class L3OrderBookVisualizer {
                         </div>
                         <div class="queue-orders" style="margin-top: 4px;">
                             ${bid.orders
-								.map((order, orderIndex) => {
-									const width = Math.max(
-										4,
-										(Number.parseFloat(order) /
-											Number.parseFloat(bid.max_order)) *
-											120,
-									);
-									const size = Number.parseFloat(order);
-									return `<span class="order-bar" title="Order ${orderIndex + 1}: ${size.toFixed(2)}" style="width: ${width}px; background: #00ff88; display: inline-block; height: 8px; margin: 1px; border-radius: 2px;"></span>`;
-								})
-								.join("")}
+															.map((order, orderIndex) => {
+																const width = Math.max(
+																	4,
+																	(Number.parseFloat(order) /
+																		Number.parseFloat(bid.max_order)) *
+																		120,
+																);
+																const size = Number.parseFloat(order);
+																return `<span class="order-bar" title="Order ${orderIndex + 1}: ${size.toFixed(2)}" style="width: ${width}px; background: #00ff88; display: inline-block; height: 8px; margin: 1px; border-radius: 2px;"></span>`;
+															})
+															.join("")}
                         </div>
                     </div>
                 `;
@@ -448,17 +536,17 @@ class L3OrderBookVisualizer {
                         </div>
                         <div class="queue-orders" style="margin-top: 4px;">
                             ${ask.orders
-								.map((order, orderIndex) => {
-									const width = Math.max(
-										4,
-										(Number.parseFloat(order) /
-											Number.parseFloat(ask.max_order)) *
-											120,
-									);
-									const size = Number.parseFloat(order);
-									return `<span class="order-bar" title="Order ${orderIndex + 1}: ${size.toFixed(2)}" style="width: ${width}px; background: #ff4444; display: inline-block; height: 8px; margin: 1px; border-radius: 2px;"></span>`;
-								})
-								.join("")}
+															.map((order, orderIndex) => {
+																const width = Math.max(
+																	4,
+																	(Number.parseFloat(order) /
+																		Number.parseFloat(ask.max_order)) *
+																		120,
+																);
+																const size = Number.parseFloat(order);
+																return `<span class="order-bar" title="Order ${orderIndex + 1}: ${size.toFixed(2)}" style="width: ${width}px; background: #ff4444; display: inline-block; height: 8px; margin: 1px; border-radius: 2px;"></span>`;
+															})
+															.join("")}
                         </div>
                     </div>
                 `;

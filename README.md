@@ -1,31 +1,39 @@
 # Binance L3 Order Book Estimator (Go)
 
-This project is a quick experiment to create a real-time L3 order book estimator for Binance perpetual futures, written in Go. It reconstructs an L3 view from L2 market depth data and visualizes it on a simple web interface.
+A real-time L3 order book visualizer for Binance perpetual futures that reconstructs individual order queues from L2 market depth data using go + d3fc.
 
-This was built with Claude Sonnet.
+Built with Claude Sonnet.
 
 Inspired by the Rust implementation by @OctopusTakopi: [binance_l3_est](https://github.com/OctopusTakopi/binance_l3_est).
 
-## How It Works
+## Features
 
-1.  **Fetches L2 Snapshot**: It starts by getting the initial order book snapshot from the Binance API.
-2.  **Connects to WebSocket**: It subscribes to the real-time L2 depth stream for a given symbol.
-3.  **Reconstructs L3 Queues**: It applies a simple algorithm to the L2 updates to estimate the individual orders that make up the total quantity at each price level.
-4.  **Serves Data**: A WebSocket server sends the reconstructed L3 data to the frontend for visualization.
-5.  **Visualizes**: A simple HTML/JS frontend renders the order book.
+- **Real-time L3 Reconstruction**: Estimates individual orders within each price level using FIFO queue simulation
+- **Dynamic Symbol Switching**: Switch between major crypto pairs (BTC, ETH, SOL, etc.) without restarting
+- **Advanced Visualization**: Segmented bars showing individual orders with d3fc charting
+- **Order Queue Display**: Visual representation of FIFO queues for top price levels
+
+## L3 Algorithm
+
+The core algorithm reconstructs Level 3 order queues from Level 2 updates:
+
+1. **Quantity Increase**: New orders are added to the back of the FIFO queue
+2. **Quantity Decrease**: First attempts exact order matching for cancellations, then reduces largest order as fallback
+3. **FIFO Maintenance**: Preserves realistic order sequence and timing
+4. **Decimal Precision**: Uses exact decimal arithmetic to prevent floating-point errors
+
+This approach provides a realistic estimation of individual order sizes and queue positions within each price level.
 
 ## Usage
 
-1.  **Run the server**:
-    ```sh
-    go run main.go [symbol]
-    ```
-    If no symbol is provided, it defaults to `dogeusdt`.
+1. **Run the server**:
+   ```sh
+   go run main.go [symbol]
+   ```
+   Defaults to `ethusdt` if no symbol provided.
 
-    Example:
-    ```sh
-    go run main.go btcusdt
-    ```
+2. **Open visualization**:
+   Navigate to `http://localhost:8080`
 
-2.  **Open the visualization**:
-    Navigate to `http://localhost:8080` in your web browser. 
+3. **Switch symbols**:
+   Use the dropdown in the top-left to change trading pairs dynamically 

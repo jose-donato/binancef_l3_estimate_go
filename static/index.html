@@ -99,6 +99,55 @@
             display: none;
         }
 
+        .ticker-selector {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: rgba(26, 26, 26, 0.9);
+            padding: 10px 15px;
+            border-radius: 6px;
+            border: 1px solid #444;
+        }
+
+        .ticker-selector label {
+            color: #ffff00;
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        .ticker-selector select {
+            background: #333;
+            color: #fff;
+            border: 1px solid #555;
+            border-radius: 4px;
+            padding: 6px 12px;
+            font-size: 14px;
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-weight: 600;
+            outline: none;
+            cursor: pointer;
+        }
+
+        .ticker-selector select:hover {
+            border-color: #777;
+            background: #404040;
+        }
+
+        .ticker-selector select:focus {
+            border-color: #ffff00;
+            box-shadow: 0 0 0 2px rgba(255, 255, 0, 0.2);
+        }
+
+        .connection-status {
+            color: #00ff88;
+            font-size: 12px;
+            font-weight: 500;
+        }
+
         h3 {
             margin: 0 0 10px 0;
             color: #ffff00;
@@ -126,6 +175,23 @@
 
 <body>
     <div class="status" id="status">L3 Connected</div>
+
+    <div class="ticker-selector">
+        <label for="ticker-select">Symbol:</label>
+        <select id="ticker-select">
+            <option value="BTCUSDT">BTC/USDT</option>
+            <option value="ETHUSDT">ETH/USDT</option>
+            <option value="BNBUSDT">BNB/USDT</option>
+            <option value="ADAUSDT">ADA/USDT</option>
+            <option value="SOLUSDT">SOL/USDT</option>
+            <option value="XRPUSDT">XRP/USDT</option>
+            <option value="DOGEUSDT">DOGE/USDT</option>
+            <option value="AVAXUSDT">AVAX/USDT</option>
+            <option value="DOTUSDT">DOT/USDT</option>
+            <option value="MATICUSDT">MATIC/USDT</option>
+        </select>
+        <span class="connection-status" id="connection-status">Connected</span>
+    </div>
 
     <div class="container">
         <div id="orderbook-chart"></div>
