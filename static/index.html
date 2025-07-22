@@ -96,17 +96,35 @@
         }
 
         .ticker-selector {
+            width: fit-content;
             position: fixed;
             top: 10px;
             left: 10px;
+            right: 10px;
             z-index: 1000;
             display: flex;
-            align-items: center;
-            gap: 10px;
+            flex-direction: column;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 20px;
             background: rgba(26, 26, 26, 0.9);
             padding: 10px 15px;
             border-radius: 6px;
             border: 1px solid #444;
+        }
+
+        .symbol-section {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .controls-section {
+            display: flex;
+            flex-direction: column;
+            align-items: start;
+            gap: 8px;
+            width: 100%;
         }
 
         .ticker-selector label {
@@ -144,31 +162,20 @@
             font-weight: 500;
         }
 
-        .controls {
-            position: fixed;
-            top: 10px;
-            right: 10px;
-            z-index: 1000;
-            background: rgba(26, 26, 26, 0.95);
-            padding: 15px;
-            border-radius: 6px;
-            border: 1px solid #444;
-            max-width: 300px;
-        }
-
-        .controls h4 {
+        .controls-section h4 {
             color: #ffff00;
-            margin: 0 0 10px 0;
-            font-size: 14px;
-            text-align: center;
+            margin: 0 0 8px 0;
+            font-size: 12px;
+            text-align: right;
         }
 
         .control-row {
             display: flex;
             align-items: center;
             justify-content: space-between;
-            margin: 8px 0;
-            gap: 10px;
+            margin: 4px 0;
+            gap: 8px;
+            width: 100%;
         }
 
         .control-row label {
@@ -218,12 +225,13 @@
         }
 
         .precision-info {
+            width: 100%;
             font-size: 10px;
             color: #888;
-            margin: 5px 0;
-            text-align: center;
+            margin: 5px 0 0 0;
+            text-align: right;
             border-top: 1px solid #333;
-            padding-top: 8px;
+            padding-top: 6px;
         }
 
         h3 {
@@ -255,48 +263,50 @@
     <div class="status" id="status">L3 Connected</div>
 
     <div class="ticker-selector">
-        <label for="ticker-select">Symbol:</label>
-        <select id="ticker-select">
-            <option value="BTCUSDT">BTC/USDT</option>
-            <option value="ETHUSDT">ETH/USDT</option>
-            <option value="BNBUSDT">BNB/USDT</option>
-            <option value="ADAUSDT">ADA/USDT</option>
-            <option value="SOLUSDT">SOL/USDT</option>
-            <option value="XRPUSDT">XRP/USDT</option>
-            <option value="DOGEUSDT">DOGE/USDT</option>
-            <option value="AVAXUSDT">AVAX/USDT</option>
-            <option value="DOTUSDT">DOT/USDT</option>
-            <option value="MATICUSDT">MATIC/USDT</option>
-        </select>
-        <span class="connection-status" id="connection-status">Connected</span>
-    </div>
-
-    <div class="controls">
-        <h4>Visualization Controls</h4>
-        
-        <div class="control-row">
-            <label>Clustering:</label>
-            <button id="kmeans-toggle">OFF</button>
+        <div class="symbol-section">
+            <label for="ticker-select">Symbol:</label>
+            <select id="ticker-select">
+                <option value="BTCUSDT">BTC/USDT</option>
+                <option value="ETHUSDT">ETH/USDT</option>
+                <option value="BNBUSDT">BNB/USDT</option>
+                <option value="ADAUSDT">ADA/USDT</option>
+                <option value="SOLUSDT">SOL/USDT</option>
+                <option value="XRPUSDT">XRP/USDT</option>
+                <option value="DOGEUSDT">DOGE/USDT</option>
+                <option value="AVAXUSDT">AVAX/USDT</option>
+                <option value="DOTUSDT">DOT/USDT</option>
+                <option value="MATICUSDT">MATIC/USDT</option>
+            </select>
+            <span class="connection-status" id="connection-status">Connected</span>
         </div>
         
-        <div class="control-row" id="cluster-count-row" style="display: none;">
-            <label>Clusters:</label>
-            <input type="range" id="cluster-slider" min="3" max="15" value="10">
-            <input type="number" id="cluster-number" min="3" max="15" value="10">
-        </div>
-        
-        <div class="control-row">
-            <label>Color Mode:</label>
-            <button id="color-mode-btn">Age-Based</button>
-        </div>
-        
-        <div class="control-row">
-            <label>Precision:</label>
-            <button id="precision-refresh">Refresh</button>
-        </div>
-        
-        <div class="precision-info" id="precision-info">
-            Price: 2 decimals | Qty: 2 decimals
+        <div class="controls-section">
+            <h4>Visualization Controls</h4>
+            
+            <div class="control-row">
+                <label>Clustering:</label>
+                <button id="kmeans-toggle">OFF</button>
+            </div>
+            
+            <div class="control-row" id="cluster-count-row" style="display: none;">
+                <label>Clusters:</label>
+                <input type="range" id="cluster-slider" min="3" max="15" value="10">
+                <input type="number" id="cluster-number" min="3" max="15" value="10">
+            </div>
+            
+            <div class="control-row">
+                <label>Color Mode:</label>
+                <button id="color-mode-btn">Age-Based</button>
+            </div>
+            
+            <div class="control-row">
+                <label>Precision:</label>
+                <button id="precision-refresh">Refresh</button>
+            </div>
+            
+            <div class="precision-info" id="precision-info">
+                Price: 2 decimals | Qty: 2 decimals
+            </div>
         </div>
     </div>
 

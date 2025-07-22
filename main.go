@@ -441,8 +441,8 @@ func (ob *L3OrderBook) getL3Snapshot(topLevels int) L3Snapshot {
 			AvgOrder:   avgOrder,
 		}
 
-		// Include individual orders and clustering for top levels
-		if i < 10 {
+		// Include individual orders and clustering for all visible levels
+		if i < topLevels {
 			level.Orders = make([]decimal.Decimal, len(queue.orders))
 			copy(level.Orders, queue.orders)
 
@@ -502,8 +502,8 @@ func (ob *L3OrderBook) getL3Snapshot(topLevels int) L3Snapshot {
 			AvgOrder:   avgOrder,
 		}
 
-		// Include individual orders and clustering for top levels
-		if i < 10 {
+		// Include individual orders and clustering for all visible levels
+		if i < topLevels {
 			level.Orders = make([]decimal.Decimal, len(queue.orders))
 			copy(level.Orders, queue.orders)
 

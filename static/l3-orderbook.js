@@ -98,7 +98,7 @@ class L3OrderBookVisualizer {
 			.filter((d, i) => i % 5 === 0)
 			.forEach((d) => {
 				const x = this.xScale(d.index);
-				const priceText = d.price.toFixed(3);
+				const priceText = this.formatPrice(d.price);
 
 				// Create diagonal text group
 				const textGroup = labelsGroup
@@ -134,7 +134,7 @@ class L3OrderBookVisualizer {
 			.filter((d, i) => i % 5 === 0)
 			.forEach((d) => {
 				const x = this.xScale(d.index);
-				const priceText = d.price.toFixed(3);
+				const priceText = this.formatPrice(d.price);
 
 				// Create diagonal text group
 				const textGroup = labelsGroup
