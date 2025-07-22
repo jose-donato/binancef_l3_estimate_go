@@ -355,8 +355,8 @@ func (ob *L3OrderBook) getL3Snapshot(topLevels int) L3Snapshot {
 	// Perform clustering if enabled
 	var clusteredBids, clusteredAsks map[string][]*ClusteredOrder
 	if ob.kmeansMode {
-		clusteredBids = ClusterOrderBook(ob.bids, ob.numClusters)
-		clusteredAsks = ClusterOrderBook(ob.asks, ob.numClusters)
+		clusteredBids = ClusterOrderBook(ob.bids, ob.numClusters, true)
+		clusteredAsks = ClusterOrderBook(ob.asks, ob.numClusters, false)
 	}
 
 	// Calculate max orders for special highlighting across all levels

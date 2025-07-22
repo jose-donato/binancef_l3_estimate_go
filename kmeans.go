@@ -5,9 +5,15 @@ import (
 	"math/rand"
 	"sort"
 	"sync"
-	"time"
 
 	"github.com/shopspring/decimal"
+)
+
+// Global K-means instances for persistent centroids
+var (
+	globalBidKMeans  *MiniBatchKMeans
+	globalAskKMeans  *MiniBatchKMeans
+	kmeansInitMutex  sync.Mutex
 )
 
 // Point structure for clustering (using qty only for simplicity)
@@ -159,8 +165,8 @@ func (kmeans *MiniBatchKMeans) Fit(orderBook map[string]*OrderQueue) []int {
 		kmeans.initializeCentroids(points)
 	}
 
-	// Mini-batch updates
-	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+	// Mini-batch updates with deterministic seed for stability
+	rng := rand.New(rand.NewSource(42)) // Fixed seed for consistent results
 	for iter := 0; iter < kmeans.maxIter; iter++ {
 		// Select mini-batch
 		batchSize := kmeans.batchSize
@@ -233,8 +239,23 @@ type ClusteredOrder struct {
 }
 
 // ClusterOrderBook applies K-means clustering to an order book
-func ClusterOrderBook(orderBook map[string]*OrderQueue, numClusters int) map[string][]*ClusteredOrder {
-	kmeans := NewMiniBatchKMeans(numClusters, 1024, 1024)
+func ClusterOrderBook(orderBook map[string]*OrderQueue, numClusters int, isBid bool) map[string][]*ClusteredOrder {
+	kmeansInitMutex.Lock()
+	var kmeans *MiniBatchKMeans
+	
+	if isBid {
+		if globalBidKMeans == nil || globalBidKMeans.numClusters != numClusters {
+			globalBidKMeans = NewMiniBatchKMeans(numClusters, 1024, 1024)
+		}
+		kmeans = globalBidKMeans
+	} else {
+		if globalAskKMeans == nil || globalAskKMeans.numClusters != numClusters {
+			globalAskKMeans = NewMiniBatchKMeans(numClusters, 1024, 1024)
+		}
+		kmeans = globalAskKMeans
+	}
+	kmeansInitMutex.Unlock()
+	
 	labels := kmeans.Fit(orderBook)
 
 	clusteredOrders := make(map[string][]*ClusteredOrder)
