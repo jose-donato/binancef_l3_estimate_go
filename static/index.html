@@ -148,6 +148,88 @@
             font-weight: 500;
         }
 
+        .controls {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            z-index: 1000;
+            background: rgba(26, 26, 26, 0.95);
+            padding: 15px;
+            border-radius: 6px;
+            border: 1px solid #444;
+            max-width: 300px;
+        }
+
+        .controls h4 {
+            color: #ffff00;
+            margin: 0 0 10px 0;
+            font-size: 14px;
+            text-align: center;
+        }
+
+        .control-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin: 8px 0;
+            gap: 10px;
+        }
+
+        .control-row label {
+            color: #ddd;
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        .control-row button {
+            background: #333;
+            color: #fff;
+            border: 1px solid #555;
+            border-radius: 4px;
+            padding: 4px 8px;
+            font-size: 11px;
+            font-family: inherit;
+            cursor: pointer;
+            min-width: 60px;
+        }
+
+        .control-row button:hover {
+            background: #404040;
+            border-color: #777;
+        }
+
+        .control-row button.active {
+            background: #ffff00;
+            color: #000;
+            border-color: #ffff00;
+            font-weight: 600;
+        }
+
+        .control-row input[type="range"] {
+            flex: 1;
+            margin: 0 10px;
+        }
+
+        .control-row input[type="number"] {
+            background: #333;
+            color: #fff;
+            border: 1px solid #555;
+            border-radius: 4px;
+            padding: 4px 8px;
+            font-size: 11px;
+            width: 50px;
+            text-align: center;
+        }
+
+        .precision-info {
+            font-size: 10px;
+            color: #888;
+            margin: 5px 0;
+            text-align: center;
+            border-top: 1px solid #333;
+            padding-top: 8px;
+        }
+
         h3 {
             margin: 0 0 10px 0;
             color: #ffff00;
@@ -191,6 +273,35 @@
             <option value="MATICUSDT">MATIC/USDT</option>
         </select>
         <span class="connection-status" id="connection-status">Connected</span>
+    </div>
+
+    <div class="controls">
+        <h4>Visualization Controls</h4>
+        
+        <div class="control-row">
+            <label>Clustering:</label>
+            <button id="kmeans-toggle">OFF</button>
+        </div>
+        
+        <div class="control-row" id="cluster-count-row" style="display: none;">
+            <label>Clusters:</label>
+            <input type="range" id="cluster-slider" min="3" max="15" value="10">
+            <input type="number" id="cluster-number" min="3" max="15" value="10">
+        </div>
+        
+        <div class="control-row">
+            <label>Color Mode:</label>
+            <button id="color-mode-btn">Age-Based</button>
+        </div>
+        
+        <div class="control-row">
+            <label>Precision:</label>
+            <button id="precision-refresh">Refresh</button>
+        </div>
+        
+        <div class="precision-info" id="precision-info">
+            Price: 2 decimals | Qty: 2 decimals
+        </div>
     </div>
 
     <div class="container">

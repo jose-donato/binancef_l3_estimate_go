@@ -5,10 +5,15 @@ class L3OrderBookVisualizer {
 		this.l3Data = null;
 		this.chart = null;
 		this.symbolSynced = false;
+		this.kmeansEnabled = false;
+		this.numClusters = 10;
+		this.colorMode = "age"; // "age" or "cluster"
+		this.precision = { price_precision: 2, qty_precision: 2 };
 
 		this.initChart();
 		this.initWebSocket();
 		this.initTickerSelector();
+		this.initControls();
 		window.addEventListener("resize", () => this.resizeChart());
 	}
 
@@ -181,12 +186,17 @@ class L3OrderBookVisualizer {
 			d.orderSizes.forEach((orderSize, segmentIndex) => {
 				const segmentHeight = this.yScale(0) - this.yScale(orderSize);
 
-				// Vary the color intensity for different segments
-				const intensity = Math.max(0.6, 1 - segmentIndex * 0.1);
-				const segmentColor =
-					d.index < 0
+				// Use server-provided colors if available, otherwise fall back to intensity-based coloring
+				let segmentColor;
+				if (d.colors && d.colors[segmentIndex]) {
+					segmentColor = d.colors[segmentIndex];
+				} else {
+					// Fallback to intensity-based coloring
+					const intensity = Math.max(0.6, 1 - segmentIndex * 0.1);
+					segmentColor = d.index < 0
 						? `rgba(0, 255, 136, ${intensity})`
 						: `rgba(255, 68, 68, ${intensity})`;
+				}
 
 				// Draw segment rectangle
 				barsGroup
@@ -197,7 +207,8 @@ class L3OrderBookVisualizer {
 					.attr("height", segmentHeight)
 					.style("fill", segmentColor)
 					.style("stroke", strokeColor)
-					.style("stroke-width", 0.5);
+					.style("stroke-width", 0.5)
+					.style("opacity", 0.9);
 
 				// Add separator line between segments (except for last segment)
 				if (segmentIndex < d.orderSizes.length - 1) {
@@ -275,6 +286,91 @@ class L3OrderBookVisualizer {
 		}
 	}
 
+	initControls() {
+		// K-means toggle
+		const kmeansToggle = document.getElementById("kmeans-toggle");
+		const clusterCountRow = document.getElementById("cluster-count-row");
+		const clusterSlider = document.getElementById("cluster-slider");
+		const clusterNumber = document.getElementById("cluster-number");
+		const colorModeBtn = document.getElementById("color-mode-btn");
+		const precisionRefresh = document.getElementById("precision-refresh");
+
+		kmeansToggle.addEventListener("click", () => {
+			this.kmeansEnabled = !this.kmeansEnabled;
+			kmeansToggle.textContent = this.kmeansEnabled ? "ON" : "OFF";
+			kmeansToggle.classList.toggle("active", this.kmeansEnabled);
+			
+			clusterCountRow.style.display = this.kmeansEnabled ? "flex" : "none";
+			
+			this.sendControlMessage({
+				type: "toggle_kmeans",
+				kmeans_mode: this.kmeansEnabled,
+				num_clusters: this.numClusters
+			});
+			
+			this.updateColorModeButton();
+		});
+
+		// Cluster count controls
+		clusterSlider.addEventListener("input", (e) => {
+			this.numClusters = parseInt(e.target.value);
+			clusterNumber.value = this.numClusters;
+			if (this.kmeansEnabled) {
+				this.sendControlMessage({
+					type: "toggle_kmeans",
+					kmeans_mode: this.kmeansEnabled,
+					num_clusters: this.numClusters
+				});
+			}
+		});
+
+		clusterNumber.addEventListener("change", (e) => {
+			const value = Math.max(3, Math.min(15, parseInt(e.target.value) || 10));
+			this.numClusters = value;
+			clusterSlider.value = value;
+			clusterNumber.value = value;
+			if (this.kmeansEnabled) {
+				this.sendControlMessage({
+					type: "toggle_kmeans",
+					kmeans_mode: this.kmeansEnabled,
+					num_clusters: this.numClusters
+				});
+			}
+		});
+
+		// Color mode button (visual only - actual mode determined by server)
+		colorModeBtn.addEventListener("click", () => {
+			// This is just for display, actual color mode is determined by kmeans state
+			this.updateColorModeButton();
+		});
+
+		// Precision refresh
+		precisionRefresh.addEventListener("click", () => {
+			this.sendControlMessage({
+				type: "refresh_precision"
+			});
+		});
+
+		this.updateColorModeButton();
+	}
+
+	updateColorModeButton() {
+		const colorModeBtn = document.getElementById("color-mode-btn");
+		if (this.kmeansEnabled) {
+			colorModeBtn.textContent = "Cluster";
+			colorModeBtn.classList.add("active");
+		} else {
+			colorModeBtn.textContent = "Age-Based";
+			colorModeBtn.classList.remove("active");
+		}
+	}
+
+	sendControlMessage(message) {
+		if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+			this.ws.send(JSON.stringify(message));
+		}
+	}
+
 	initTickerSelector() {
 		const tickerSelect = document.getElementById("ticker-select");
 		const connectionStatus = document.getElementById("connection-status");
@@ -318,6 +414,20 @@ class L3OrderBookVisualizer {
 
 				if (message.type === "l3_update") {
 					this.l3Data = message.data;
+					
+					// Update clustering state from server
+					if (message.data.kmeans_mode !== undefined) {
+						this.kmeansEnabled = message.data.kmeans_mode;
+						this.numClusters = message.data.num_clusters || 10;
+						this.updateControlsFromServer();
+					}
+					
+					// Update precision info
+					if (message.data.precision) {
+						this.precision = message.data.precision;
+						this.updatePrecisionDisplay();
+					}
+					
 					this.renderChart();
 					this.updateSidebar();
 					this.updateQueueVisualization();
@@ -342,6 +452,20 @@ class L3OrderBookVisualizer {
 					// Clear existing data
 					this.l3Data = null;
 					this.plotArea.selectAll("*").remove();
+				} else if (message.type === "kmeans_updated") {
+					// Update clustering controls
+					this.kmeansEnabled = message.kmeans_mode;
+					this.numClusters = message.num_clusters;
+					this.updateControlsFromServer();
+				} else if (message.type === "precision_refreshed") {
+					connectionStatus.textContent = "Precision updated";
+					connectionStatus.style.color = "#00ff88";
+					setTimeout(() => {
+						connectionStatus.textContent = "Connected";
+					}, 2000);
+				} else if (message.type === "precision_info") {
+					this.precision = message.precision;
+					this.updatePrecisionDisplay();
 				} else if (message.type === "error") {
 					connectionStatus.textContent = "Error: " + message.message;
 					connectionStatus.style.color = "#ff4444";
@@ -357,6 +481,42 @@ class L3OrderBookVisualizer {
 		};
 	}
 
+	updateControlsFromServer() {
+		// Update K-means toggle
+		const kmeansToggle = document.getElementById("kmeans-toggle");
+		const clusterCountRow = document.getElementById("cluster-count-row");
+		const clusterSlider = document.getElementById("cluster-slider");
+		const clusterNumber = document.getElementById("cluster-number");
+
+		kmeansToggle.textContent = this.kmeansEnabled ? "ON" : "OFF";
+		kmeansToggle.classList.toggle("active", this.kmeansEnabled);
+		clusterCountRow.style.display = this.kmeansEnabled ? "flex" : "none";
+		clusterSlider.value = this.numClusters;
+		clusterNumber.value = this.numClusters;
+		
+		this.updateColorModeButton();
+	}
+
+	updatePrecisionDisplay() {
+		const precisionInfo = document.getElementById("precision-info");
+		if (this.precision && precisionInfo) {
+			precisionInfo.innerHTML = `
+				Price: ${this.precision.price_precision} decimals | 
+				Qty: ${this.precision.qty_precision} decimals
+			`;
+		}
+	}
+
+	formatPrice(price) {
+		const decimals = this.precision ? this.precision.price_precision : 2;
+		return parseFloat(price).toFixed(decimals);
+	}
+
+	formatQuantity(qty) {
+		const decimals = this.precision ? this.precision.qty_precision : 2;
+		return parseFloat(qty).toFixed(decimals);
+	}
+
 	renderChart() {
 		if (!this.svg || !this.l3Data) return;
 
@@ -364,26 +524,54 @@ class L3OrderBookVisualizer {
 		if (!bids.length || !asks.length) return;
 
 		// Prepare bid data with individual order segments
-		const bidData = bids.slice(0, 25).map((bid, i) => ({
-			index: -(i + 1),
-			size: Number.parseFloat(bid.total_size),
-			price: Number.parseFloat(bid.price),
-			orders: bid.order_count,
-			orderSizes: bid.orders
-				? bid.orders.map((o) => Number.parseFloat(o))
-				: [Number.parseFloat(bid.total_size)],
-		}));
+		const bidData = bids.slice(0, 25).map((bid, i) => {
+			let orderSizes, colors;
+			
+			// Use clustered orders if available and clustering is enabled
+			if (this.kmeansEnabled && bid.clustered_orders && bid.clustered_orders.length > 0) {
+				orderSizes = bid.clustered_orders.map(co => Number.parseFloat(co.qty));
+				colors = bid.colors || null;
+			} else {
+				orderSizes = bid.orders 
+					? bid.orders.map(o => Number.parseFloat(o))
+					: [Number.parseFloat(bid.total_size)];
+				colors = bid.colors || null;
+			}
+			
+			return {
+				index: -(i + 1),
+				size: Number.parseFloat(bid.total_size),
+				price: Number.parseFloat(bid.price),
+				orders: bid.order_count,
+				orderSizes: orderSizes,
+				colors: colors
+			};
+		});
 
 		// Prepare ask data with individual order segments
-		const askData = asks.slice(0, 25).map((ask, i) => ({
-			index: i + 1,
-			size: Number.parseFloat(ask.total_size),
-			price: Number.parseFloat(ask.price),
-			orders: ask.order_count,
-			orderSizes: ask.orders
-				? ask.orders.map((o) => Number.parseFloat(o))
-				: [Number.parseFloat(ask.total_size)],
-		}));
+		const askData = asks.slice(0, 25).map((ask, i) => {
+			let orderSizes, colors;
+			
+			// Use clustered orders if available and clustering is enabled
+			if (this.kmeansEnabled && ask.clustered_orders && ask.clustered_orders.length > 0) {
+				orderSizes = ask.clustered_orders.map(co => Number.parseFloat(co.qty));
+				colors = ask.colors || null;
+			} else {
+				orderSizes = ask.orders 
+					? ask.orders.map(o => Number.parseFloat(o))
+					: [Number.parseFloat(ask.total_size)];
+				colors = ask.colors || null;
+			}
+			
+			return {
+				index: i + 1,
+				size: Number.parseFloat(ask.total_size),
+				price: Number.parseFloat(ask.price),
+				orders: ask.order_count,
+				orderSizes: orderSizes,
+				colors: colors
+			};
+		});
 
 		// Update y-domain based on max size
 		const maxSize = Math.max(
@@ -455,8 +643,8 @@ class L3OrderBookVisualizer {
 							.map(
 								(ask) => `
                 <div class="level ask-level">
-                    <span>${Number.parseFloat(ask.price).toFixed(5)}</span>
-                    <span>${Number.parseFloat(ask.total_size).toFixed(0)}</span>
+                    <span>${this.formatPrice(ask.price)}</span>
+                    <span>${this.formatQuantity(ask.total_size)}</span>
                     <span>(${ask.order_count})</span>
                 </div>
             `,
@@ -472,8 +660,8 @@ class L3OrderBookVisualizer {
 							.map(
 								(bid) => `
                 <div class="level bid-level">
-                    <span>${Number.parseFloat(bid.price).toFixed(5)}</span>
-                    <span>${Number.parseFloat(bid.total_size).toFixed(0)}</span>
+                    <span>${this.formatPrice(bid.price)}</span>
+                    <span>${this.formatQuantity(bid.total_size)}</span>
                     <span>(${bid.order_count})</span>
                 </div>
             `,
@@ -487,7 +675,7 @@ class L3OrderBookVisualizer {
 				Number.parseFloat(asks[0].price) - Number.parseFloat(bids[0].price);
 			const spreadPct = (spread / Number.parseFloat(asks[0].price)) * 100;
 			document.getElementById("spread-info").innerHTML = `
-                Spread: ${spread.toFixed(5)} (${spreadPct.toFixed(3)}%)
+                Spread: ${this.formatPrice(spread)} (${spreadPct.toFixed(3)}%)
             `;
 		}
 	}
@@ -505,7 +693,7 @@ class L3OrderBookVisualizer {
 				html += `
                     <div style="margin: 5px 0; border-left: 3px solid #00ff88; padding-left: 8px;">
                         <div style="font-size: 12px; color: #00ff88; font-weight: 600;">
-                            ${Number.parseFloat(bid.price).toFixed(5)} - ${bid.order_count} orders (${Number.parseFloat(bid.total_size).toFixed(1)} total)
+                            ${this.formatPrice(bid.price)} - ${bid.order_count} orders (${this.formatQuantity(bid.total_size)} total)
                         </div>
                         <div class="queue-orders" style="margin-top: 4px;">
                             ${bid.orders
@@ -532,7 +720,7 @@ class L3OrderBookVisualizer {
 				html += `
                     <div style="margin: 5px 0; border-left: 3px solid #ff4444; padding-left: 8px;">
                         <div style="font-size: 12px; color: #ff4444; font-weight: 600;">
-                            ${Number.parseFloat(ask.price).toFixed(5)} - ${ask.order_count} orders (${Number.parseFloat(ask.total_size).toFixed(1)} total)
+                            ${this.formatPrice(ask.price)} - ${ask.order_count} orders (${this.formatQuantity(ask.total_size)} total)
                         </div>
                         <div class="queue-orders" style="margin-top: 4px;">
                             ${ask.orders

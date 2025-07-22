@@ -47,14 +47,18 @@ func (oq *OrderQueue) largestOrderIndex() int {
 
 // L3 Order Book Engine
 type L3OrderBook struct {
-	bids        map[string]*OrderQueue // price -> order queue
-	asks        map[string]*OrderQueue
-	symbol      string
-	lastID      int64
-	mu          sync.RWMutex
-	kmeansMode  bool           // Whether to enable K-means clustering
-	numClusters int            // Number of clusters for K-means
-	precision   *PrecisionInfo // Symbol precision information
+	bids            map[string]*OrderQueue        // price -> order queue (legacy)
+	asks            map[string]*OrderQueue        // price -> order queue (legacy)
+	enhancedBids    map[string]*EnhancedOrderQueue // price -> enhanced order queue
+	enhancedAsks    map[string]*EnhancedOrderQueue // price -> enhanced order queue
+	symbol          string
+	lastID          int64
+	mu              sync.RWMutex
+	kmeansMode      bool           // Whether to enable K-means clustering
+	numClusters     int            // Number of clusters for K-means
+	precision       *PrecisionInfo // Symbol precision information
+	useEnhancedMode bool           // Whether to use enhanced queue management
+	lastOptimization int64         // Last queue optimization timestamp
 }
 
 func NewL3OrderBook(symbol string) *L3OrderBook {
@@ -64,12 +68,16 @@ func NewL3OrderBook(symbol string) *L3OrderBook {
 	}
 	
 	return &L3OrderBook{
-		bids:        make(map[string]*OrderQueue),
-		asks:        make(map[string]*OrderQueue),
-		symbol:      symbol,
-		kmeansMode:  false, // Default to disabled
-		numClusters: 10,    // Default number of clusters
-		precision:   precisionManager.GetPrecisionInfo(symbol),
+		bids:             make(map[string]*OrderQueue),
+		asks:             make(map[string]*OrderQueue),
+		enhancedBids:     make(map[string]*EnhancedOrderQueue),
+		enhancedAsks:     make(map[string]*EnhancedOrderQueue),
+		symbol:           symbol,
+		kmeansMode:       false, // Default to disabled
+		numClusters:      10,    // Default number of clusters
+		precision:        precisionManager.GetPrecisionInfo(symbol),
+		useEnhancedMode:  true,  // Enable enhanced mode by default
+		lastOptimization: time.Now().UnixMilli(),
 	}
 }
 
@@ -81,6 +89,8 @@ func (ob *L3OrderBook) loadSnapshot(resp *binanceRESTResp) {
 	// Clear existing queues
 	ob.bids = make(map[string]*OrderQueue)
 	ob.asks = make(map[string]*OrderQueue)
+	ob.enhancedBids = make(map[string]*EnhancedOrderQueue)
+	ob.enhancedAsks = make(map[string]*EnhancedOrderQueue)
 
 	// Initialize bid queues
 	for _, bid := range resp.Bids {
@@ -93,8 +103,16 @@ func (ob *L3OrderBook) loadSnapshot(resp *binanceRESTResp) {
 			continue
 		}
 
+		// Legacy queue
 		ob.bids[price] = &OrderQueue{
 			orders: []decimal.Decimal{qty}, // Start with single order
+		}
+
+		// Enhanced queue
+		if ob.useEnhancedMode {
+			enhancedQueue := NewEnhancedOrderQueue(price)
+			enhancedQueue.AddOrder(qty)
+			ob.enhancedBids[price] = enhancedQueue
 		}
 	}
 
@@ -109,8 +127,16 @@ func (ob *L3OrderBook) loadSnapshot(resp *binanceRESTResp) {
 			continue
 		}
 
+		// Legacy queue
 		ob.asks[price] = &OrderQueue{
 			orders: []decimal.Decimal{qty}, // Start with single order
+		}
+
+		// Enhanced queue
+		if ob.useEnhancedMode {
+			enhancedQueue := NewEnhancedOrderQueue(price)
+			enhancedQueue.AddOrder(qty)
+			ob.enhancedAsks[price] = enhancedQueue
 		}
 	}
 
@@ -138,8 +164,14 @@ func (ob *L3OrderBook) applyDelta(update *binanceWSUpdate) {
 		if newQty.IsZero() {
 			// Remove entire price level
 			delete(ob.bids, price)
+			if ob.useEnhancedMode {
+				delete(ob.enhancedBids, price)
+			}
 		} else {
 			ob.updateQueue(ob.bids, price, newQty)
+			if ob.useEnhancedMode {
+				ob.updateEnhancedQueue(ob.enhancedBids, price, newQty)
+			}
 		}
 	}
 
@@ -157,8 +189,14 @@ func (ob *L3OrderBook) applyDelta(update *binanceWSUpdate) {
 		if newQty.IsZero() {
 			// Remove entire price level
 			delete(ob.asks, price)
+			if ob.useEnhancedMode {
+				delete(ob.enhancedAsks, price)
+			}
 		} else {
 			ob.updateQueue(ob.asks, price, newQty)
+			if ob.useEnhancedMode {
+				ob.updateEnhancedQueue(ob.enhancedAsks, price, newQty)
+			}
 		}
 	}
 }
@@ -217,6 +255,53 @@ func (ob *L3OrderBook) updateQueue(side map[string]*OrderQueue, price string, ne
 	// If quantities are equal, no change needed
 }
 
+// updateEnhancedQueue updates enhanced queue with improved algorithms
+func (ob *L3OrderBook) updateEnhancedQueue(side map[string]*EnhancedOrderQueue, price string, newQty decimal.Decimal) {
+	queue, exists := side[price]
+
+	if !exists {
+		// New price level - create initial queue
+		newQueue := NewEnhancedOrderQueue(price)
+		newQueue.AddOrder(newQty)
+		side[price] = newQueue
+		return
+	}
+
+	oldSum := queue.GetTotalQty()
+
+	if newQty.GreaterThan(oldSum) {
+		// Quantity increased - new order added
+		diff := newQty.Sub(oldSum)
+		queue.AddOrder(diff)
+	} else if newQty.LessThan(oldSum) {
+		// Quantity decreased - remove using enhanced algorithm
+		diff := oldSum.Sub(newQty)
+		queue.RemoveQty(diff)
+	}
+	// If quantities are equal, no change needed
+
+	// Periodic optimization
+	if time.Now().UnixMilli()-ob.lastOptimization > 30000 { // Every 30 seconds
+		ob.optimizeAllQueues()
+	}
+}
+
+// optimizeAllQueues performs maintenance on all enhanced queues
+func (ob *L3OrderBook) optimizeAllQueues() {
+	// Update ages for all orders
+	for _, queue := range ob.enhancedBids {
+		queue.UpdateAge()
+		queue.OptimizeQueue()
+	}
+	for _, queue := range ob.enhancedAsks {
+		queue.UpdateAge()
+		queue.OptimizeQueue()
+	}
+	
+	ob.lastOptimization = time.Now().UnixMilli()
+	log.Printf("Optimized %d bid queues and %d ask queues", len(ob.enhancedBids), len(ob.enhancedAsks))
+}
+
 // Enhanced L3 snapshot with queue details
 type L3Level struct {
 	Price           decimal.Decimal      `json:"price"`
@@ -227,6 +312,8 @@ type L3Level struct {
 	MaxOrder        decimal.Decimal      `json:"max_order"`
 	AvgOrder        decimal.Decimal      `json:"avg_order"`
 	Colors          []string             `json:"colors,omitempty"`           // Color information for visualization
+	QueueMetrics    *QueueMetrics        `json:"queue_metrics,omitempty"`    // Enhanced queue metrics
+	OrderDetails    []*OrderInfo         `json:"order_details,omitempty"`    // Detailed order information
 }
 
 type L3Snapshot struct {
@@ -359,6 +446,15 @@ func (ob *L3OrderBook) getL3Snapshot(topLevels int) L3Snapshot {
 			level.Orders = make([]decimal.Decimal, len(queue.orders))
 			copy(level.Orders, queue.orders)
 
+			// Include enhanced queue information if available
+			if ob.useEnhancedMode {
+				if enhancedQueue, exists := ob.enhancedBids[price]; exists {
+					metrics := enhancedQueue.GetMetrics()
+					level.QueueMetrics = &metrics
+					level.OrderDetails = enhancedQueue.GetOrders()
+				}
+			}
+
 			// Generate colors based on mode
 			if ob.kmeansMode {
 				// Add clustered orders if clustering is enabled
@@ -410,6 +506,15 @@ func (ob *L3OrderBook) getL3Snapshot(topLevels int) L3Snapshot {
 		if i < 10 {
 			level.Orders = make([]decimal.Decimal, len(queue.orders))
 			copy(level.Orders, queue.orders)
+
+			// Include enhanced queue information if available
+			if ob.useEnhancedMode {
+				if enhancedQueue, exists := ob.enhancedAsks[price]; exists {
+					metrics := enhancedQueue.GetMetrics()
+					level.QueueMetrics = &metrics
+					level.OrderDetails = enhancedQueue.GetOrders()
+				}
+			}
 
 			// Generate colors based on mode
 			if ob.kmeansMode {
