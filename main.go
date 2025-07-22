@@ -29,9 +29,6 @@ func (oq *OrderQueue) sum() decimal.Decimal {
 	return total
 }
 
-func (oq *OrderQueue) isEmpty() bool {
-	return len(oq.orders) == 0
-}
 
 func (oq *OrderQueue) largestOrderIndex() int {
 	if len(oq.orders) == 0 {
@@ -50,18 +47,29 @@ func (oq *OrderQueue) largestOrderIndex() int {
 
 // L3 Order Book Engine
 type L3OrderBook struct {
-	bids   map[string]*OrderQueue // price -> order queue
-	asks   map[string]*OrderQueue
-	symbol string
-	lastID int64
-	mu     sync.RWMutex
+	bids        map[string]*OrderQueue // price -> order queue
+	asks        map[string]*OrderQueue
+	symbol      string
+	lastID      int64
+	mu          sync.RWMutex
+	kmeansMode  bool           // Whether to enable K-means clustering
+	numClusters int            // Number of clusters for K-means
+	precision   *PrecisionInfo // Symbol precision information
 }
 
 func NewL3OrderBook(symbol string) *L3OrderBook {
+	// Initialize precision manager if not already done
+	if precisionManager == nil {
+		InitializePrecisionManager()
+	}
+	
 	return &L3OrderBook{
-		bids:   make(map[string]*OrderQueue),
-		asks:   make(map[string]*OrderQueue),
-		symbol: symbol,
+		bids:        make(map[string]*OrderQueue),
+		asks:        make(map[string]*OrderQueue),
+		symbol:      symbol,
+		kmeansMode:  false, // Default to disabled
+		numClusters: 10,    // Default number of clusters
+		precision:   precisionManager.GetPrecisionInfo(symbol),
 	}
 }
 
@@ -211,19 +219,24 @@ func (ob *L3OrderBook) updateQueue(side map[string]*OrderQueue, price string, ne
 
 // Enhanced L3 snapshot with queue details
 type L3Level struct {
-	Price      decimal.Decimal   `json:"price"`
-	TotalSize  decimal.Decimal   `json:"total_size"`
-	OrderCount int               `json:"order_count"`
-	Orders     []decimal.Decimal `json:"orders,omitempty"` // Individual orders for top levels
-	MaxOrder   decimal.Decimal   `json:"max_order"`
-	AvgOrder   decimal.Decimal   `json:"avg_order"`
+	Price           decimal.Decimal      `json:"price"`
+	TotalSize       decimal.Decimal      `json:"total_size"`
+	OrderCount      int                  `json:"order_count"`
+	Orders          []decimal.Decimal    `json:"orders,omitempty"`          // Individual orders for top levels
+	ClusteredOrders []*ClusteredOrder    `json:"clustered_orders,omitempty"` // Orders with cluster information
+	MaxOrder        decimal.Decimal      `json:"max_order"`
+	AvgOrder        decimal.Decimal      `json:"avg_order"`
+	Colors          []string             `json:"colors,omitempty"`           // Color information for visualization
 }
 
 type L3Snapshot struct {
-	Bids      []L3Level `json:"bids"`
-	Asks      []L3Level `json:"asks"`
-	Timestamp int64     `json:"timestamp"`
-	Symbol    string    `json:"symbol"`
+	Bids        []L3Level      `json:"bids"`
+	Asks        []L3Level      `json:"asks"`
+	Timestamp   int64          `json:"timestamp"`
+	Symbol      string         `json:"symbol"`
+	KmeansMode  bool           `json:"kmeans_mode"`  // Whether clustering is enabled
+	NumClusters int            `json:"num_clusters"` // Number of clusters used
+	Precision   *PrecisionInfo `json:"precision"`    // Symbol precision information
 }
 
 func (ob *L3OrderBook) getL3Snapshot(topLevels int) L3Snapshot {
@@ -251,6 +264,65 @@ func (ob *L3OrderBook) getL3Snapshot(topLevels int) L3Snapshot {
 		pj, _ := decimal.NewFromString(askPrices[j])
 		return pi.LessThan(pj)
 	})
+
+	// Perform clustering if enabled
+	var clusteredBids, clusteredAsks map[string][]*ClusteredOrder
+	if ob.kmeansMode {
+		clusteredBids = ClusterOrderBook(ob.bids, ob.numClusters)
+		clusteredAsks = ClusterOrderBook(ob.asks, ob.numClusters)
+	}
+
+	// Calculate max orders for special highlighting across all levels
+	maxBidOrder := decimal.Zero
+	secondMaxBidOrder := decimal.Zero
+	maxAskOrder := decimal.Zero
+	secondMaxAskOrder := decimal.Zero
+
+	// Find max bid orders
+	var allBidOrders []decimal.Decimal
+	for _, queue := range ob.bids {
+		queue.mu.RLock()
+		for _, order := range queue.orders {
+			if order.GreaterThan(decimal.Zero) {
+				allBidOrders = append(allBidOrders, order)
+			}
+		}
+		queue.mu.RUnlock()
+	}
+	if len(allBidOrders) > 0 {
+		// Sort to find max and second max
+		for _, order := range allBidOrders {
+			if order.GreaterThan(maxBidOrder) {
+				secondMaxBidOrder = maxBidOrder
+				maxBidOrder = order
+			} else if order.GreaterThan(secondMaxBidOrder) && !order.Equal(maxBidOrder) {
+				secondMaxBidOrder = order
+			}
+		}
+	}
+
+	// Find max ask orders
+	var allAskOrders []decimal.Decimal
+	for _, queue := range ob.asks {
+		queue.mu.RLock()
+		for _, order := range queue.orders {
+			if order.GreaterThan(decimal.Zero) {
+				allAskOrders = append(allAskOrders, order)
+			}
+		}
+		queue.mu.RUnlock()
+	}
+	if len(allAskOrders) > 0 {
+		// Sort to find max and second max
+		for _, order := range allAskOrders {
+			if order.GreaterThan(maxAskOrder) {
+				secondMaxAskOrder = maxAskOrder
+				maxAskOrder = order
+			} else if order.GreaterThan(secondMaxAskOrder) && !order.Equal(maxAskOrder) {
+				secondMaxAskOrder = order
+			}
+		}
+	}
 
 	// Build L3 bid levels
 	bids := make([]L3Level, 0, min(topLevels, len(bidPrices)))
@@ -282,10 +354,22 @@ func (ob *L3OrderBook) getL3Snapshot(topLevels int) L3Snapshot {
 			AvgOrder:   avgOrder,
 		}
 
-		// Include individual orders for top 10 levels
+		// Include individual orders and clustering for top levels
 		if i < 10 {
 			level.Orders = make([]decimal.Decimal, len(queue.orders))
 			copy(level.Orders, queue.orders)
+
+			// Generate colors based on mode
+			if ob.kmeansMode {
+				// Add clustered orders if clustering is enabled
+				if clusteredOrders, exists := clusteredBids[price]; exists {
+					level.ClusteredOrders = clusteredOrders
+					level.Colors = GenerateClusteredOrderColors(clusteredOrders, true, maxBidOrder, secondMaxBidOrder)
+				}
+			} else {
+				// Generate age-based colors for normal mode
+				level.Colors = GenerateOrderColors(queue.orders, true, maxBidOrder, secondMaxBidOrder)
+			}
 		}
 
 		bids = append(bids, level)
@@ -322,10 +406,22 @@ func (ob *L3OrderBook) getL3Snapshot(topLevels int) L3Snapshot {
 			AvgOrder:   avgOrder,
 		}
 
-		// Include individual orders for top 10 levels
+		// Include individual orders and clustering for top levels
 		if i < 10 {
 			level.Orders = make([]decimal.Decimal, len(queue.orders))
 			copy(level.Orders, queue.orders)
+
+			// Generate colors based on mode
+			if ob.kmeansMode {
+				// Add clustered orders if clustering is enabled
+				if clusteredOrders, exists := clusteredAsks[price]; exists {
+					level.ClusteredOrders = clusteredOrders
+					level.Colors = GenerateClusteredOrderColors(clusteredOrders, false, maxAskOrder, secondMaxAskOrder)
+				}
+			} else {
+				// Generate age-based colors for normal mode
+				level.Colors = GenerateOrderColors(queue.orders, false, maxAskOrder, secondMaxAskOrder)
+			}
 		}
 
 		asks = append(asks, level)
@@ -333,16 +429,51 @@ func (ob *L3OrderBook) getL3Snapshot(topLevels int) L3Snapshot {
 	}
 
 	return L3Snapshot{
-		Bids:      bids,
-		Asks:      asks,
-		Timestamp: time.Now().UnixMilli(),
-		Symbol:    ob.symbol,
+		Bids:        bids,
+		Asks:        asks,
+		Timestamp:   time.Now().UnixMilli(),
+		Symbol:      ob.symbol,
+		KmeansMode:  ob.kmeansMode,
+		NumClusters: ob.numClusters,
+		Precision:   ob.precision,
+	}
+}
+
+// SetKmeansMode enables or disables K-means clustering
+func (ob *L3OrderBook) SetKmeansMode(enabled bool) {
+	ob.mu.Lock()
+	defer ob.mu.Unlock()
+	ob.kmeansMode = enabled
+}
+
+// SetNumClusters sets the number of clusters for K-means
+func (ob *L3OrderBook) SetNumClusters(clusters int) {
+	ob.mu.Lock()
+	defer ob.mu.Unlock()
+	if clusters > 0 && clusters <= 20 { // Reasonable limits
+		ob.numClusters = clusters
+	}
+}
+
+// GetClusteringInfo returns current clustering configuration
+func (ob *L3OrderBook) GetClusteringInfo() (bool, int) {
+	ob.mu.RLock()
+	defer ob.mu.RUnlock()
+	return ob.kmeansMode, ob.numClusters
+}
+
+// RefreshPrecision refreshes precision information for the symbol
+func (ob *L3OrderBook) RefreshPrecision() {
+	ob.mu.Lock()
+	defer ob.mu.Unlock()
+	if precisionManager != nil {
+		ob.precision = precisionManager.GetPrecisionInfo(ob.symbol)
 	}
 }
 
 // Rest of the implementation (WebSocket, HTTP handlers) remains the same
 type binanceWSUpdate struct {
-	U int64      `json:"u"`
+	U int64      `json:"U"`
 	u int64      `json:"u"`
 	B [][]string `json:"b"`
 	A [][]string `json:"a"`
@@ -394,8 +525,10 @@ func main() {
 }
 
 type WSMessage struct {
-	Type   string `json:"type"`
-	Symbol string `json:"symbol,omitempty"`
+	Type        string `json:"type"`
+	Symbol      string `json:"symbol,omitempty"`
+	KmeansMode  *bool  `json:"kmeans_mode,omitempty"`
+	NumClusters *int   `json:"num_clusters,omitempty"`
 }
 
 func wsHandler() http.HandlerFunc {
@@ -423,25 +556,84 @@ func wsHandler() http.HandlerFunc {
 					return
 				}
 
-				if msg.Type == "switch_symbol" && msg.Symbol != "" {
-					newSymbol := strings.ToLower(msg.Symbol)
-					log.Printf("Switching to symbol: %s", strings.ToUpper(newSymbol))
-					
-					// Switch symbol
-					if err := switchSymbol(newSymbol); err != nil {
-						errorMsg := map[string]interface{}{
-							"type":    "error",
-							"message": err.Error(),
+				switch msg.Type {
+				case "switch_symbol":
+					if msg.Symbol != "" {
+						newSymbol := strings.ToLower(msg.Symbol)
+						log.Printf("Switching to symbol: %s", strings.ToUpper(newSymbol))
+						
+						// Switch symbol
+						if err := switchSymbol(newSymbol); err != nil {
+							errorMsg := map[string]any{
+								"type":    "error",
+								"message": err.Error(),
+							}
+							conn.WriteJSON(errorMsg)
+						} else {
+							// Notify successful switch
+							switchMsg := map[string]any{
+								"type":   "symbol_switched",
+								"symbol": strings.ToUpper(newSymbol),
+							}
+							conn.WriteJSON(switchMsg)
 						}
-						conn.WriteJSON(errorMsg)
-					} else {
-						// Notify successful switch
-						switchMsg := map[string]interface{}{
-							"type":   "symbol_switched",
-							"symbol": strings.ToUpper(newSymbol),
-						}
-						conn.WriteJSON(switchMsg)
 					}
+
+				case "toggle_kmeans":
+					appState.mu.Lock()
+					if msg.KmeansMode != nil {
+						appState.book.SetKmeansMode(*msg.KmeansMode)
+						log.Printf("K-means mode set to: %t", *msg.KmeansMode)
+					}
+					if msg.NumClusters != nil {
+						appState.book.SetNumClusters(*msg.NumClusters)
+						log.Printf("Number of clusters set to: %d", *msg.NumClusters)
+					}
+					
+					enabled, clusters := appState.book.GetClusteringInfo()
+					appState.mu.Unlock()
+					
+					// Send confirmation
+					responseMsg := map[string]any{
+						"type":         "kmeans_updated",
+						"kmeans_mode":  enabled,
+						"num_clusters": clusters,
+					}
+					conn.WriteJSON(responseMsg)
+
+				case "get_clustering_info":
+					appState.mu.RLock()
+					enabled, clusters := appState.book.GetClusteringInfo()
+					appState.mu.RUnlock()
+					
+					responseMsg := map[string]any{
+						"type":         "clustering_info",
+						"kmeans_mode":  enabled,
+						"num_clusters": clusters,
+					}
+					conn.WriteJSON(responseMsg)
+
+				case "refresh_precision":
+					appState.mu.Lock()
+					appState.book.RefreshPrecision()
+					appState.mu.Unlock()
+					
+					responseMsg := map[string]any{
+						"type":    "precision_refreshed",
+						"message": "Precision information updated",
+					}
+					conn.WriteJSON(responseMsg)
+
+				case "get_precision_info":
+					appState.mu.RLock()
+					precision := appState.book.precision
+					appState.mu.RUnlock()
+					
+					responseMsg := map[string]any{
+						"type":      "precision_info",
+						"precision": precision,
+					}
+					conn.WriteJSON(responseMsg)
 				}
 			}
 		}()
@@ -453,7 +645,7 @@ func wsHandler() http.HandlerFunc {
 				snapshot := appState.book.getL3Snapshot(100)
 				appState.mu.RUnlock()
 				
-				message := map[string]interface{}{
+				message := map[string]any{
 					"type": "l3_update",
 					"data": snapshot,
 				}
