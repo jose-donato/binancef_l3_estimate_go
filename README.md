@@ -137,7 +137,3 @@ This approach significantly outperforms simple L2 aggregation for understanding 
 ## 📄 License
 
 MIT License - see [LICENSE](LICENSE) file for details.
-
----
-
-*This implementation achieves full feature parity with the original Rust version while adding enhanced queue management and WebSocket API controls.* 
